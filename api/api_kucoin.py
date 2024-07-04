@@ -1,7 +1,10 @@
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
+import sys
+
 import requests
 import threading
 import time
@@ -27,9 +30,9 @@ class KucoinAPI(GeneralAPI):
         self.api_passphrase = personal_keys[self.exch_name]['api_passphrase']
 
         self.passphrase = base64.b64encode(
-                                hmac.new(self.api_secret.encode('utf-8'),
-                                         self.api_passphrase.encode('utf-8'),
-                                         hashlib.sha256).digest())
+            hmac.new(self.api_secret.encode('utf-8'),
+                     self.api_passphrase.encode('utf-8'),
+                     hashlib.sha256).digest())
         # a set of pairs
         self.update_pairs()
 
@@ -70,7 +73,7 @@ class KucoinAPI(GeneralAPI):
                 'baseIncrement': float(resp_json['data'][i]['baseIncrement']),
                 'quoteIncrement': float(resp_json['data'][i]['quoteIncrement']),
                 'priceIncrement': float(resp_json['data'][i]['priceIncrement'])
-                }
+            }
 
         self.pairs = pairs
         self.pairs_specs = pairs_specs
@@ -93,7 +96,7 @@ class KucoinAPI(GeneralAPI):
         res = dict()
         resp_json = response.json()
 
-        #TODO keep not only old name
+        # TODO keep not only old name
         # careful that `currency` holds the historical token symbol,
         # while `name` holds the current token symbol
         n_tokens = len(resp_json['data'])
@@ -109,8 +112,8 @@ class KucoinAPI(GeneralAPI):
         now = int(time.time() * 1000)
         str_to_sign = str(now) + full_endpoint + data_string
         signature = base64.b64encode(hmac.new(self.api_secret.encode('utf-8'),
-                                            str_to_sign.encode('utf-8'),
-                                            hashlib.sha256).digest())
+                                              str_to_sign.encode('utf-8'),
+                                              hashlib.sha256).digest())
         headers = {
             'Content-Type': 'application/json',
             'KC-API-SIGN': signature,
@@ -182,13 +185,13 @@ class KucoinAPI(GeneralAPI):
          execution_price,
          base_amount,
          printing) = self._round_to_increment(
-                                    pair_name,
-                                    good_order,
-                                    amount_sell,
-                                    amount_buy,
-                                    ref_price,
-                                    max_impact=max_impact
-                                    )
+            pair_name,
+            good_order,
+            amount_sell,
+            amount_buy,
+            ref_price,
+            max_impact=max_impact
+        )
 
         method = 'POST'
         endpoint = '/api/v1/orders'
@@ -199,7 +202,7 @@ class KucoinAPI(GeneralAPI):
                 'timeInForce': time_in_force}
 
         data['price'] = execution_price
-        if good_order: # note A = token_sell, B = token_buy, pair A/B
+        if good_order:  # note A = token_sell, B = token_buy, pair A/B
             if amount_sell is not None:
                 data['side'] = 'sell'
                 data['size'] = base_amount
@@ -238,7 +241,6 @@ class KucoinAPI(GeneralAPI):
         json_pretty = json.dumps(data, separators=(',', ':'), indent=4)
         uprint(f'[{self.exch_name}: {pair_name}] data \n'
                f'   {json_pretty}')
-
 
         if response.status_code != 200:
             uprint(f'[{self.exch_name}: {pair_name}] ERROR: failure in request '
@@ -344,7 +346,7 @@ class KucoinAPI(GeneralAPI):
         if token_symbol not in self.listed_tokens.keys():
             assert resp_json['data'] == []
             uprint(f'[{self.exch_name}] WARNING: token {token_symbol} is '
-                    f'not listed.')
+                   f'not listed.')
             balance = 0
             available = 0
         else:
@@ -352,7 +354,6 @@ class KucoinAPI(GeneralAPI):
             available = float(resp_json['data'][0]['available'])
 
         return balance, available
-
 
     def create_ws_handle(self):
         method = 'POST'
@@ -378,86 +379,69 @@ class KucoinAPI(GeneralAPI):
         return str(data)
 
 
-class KucoinPriceSellSocketThread(threading.Thread):
+class KucoinPriceSellSocket:
     def __init__(self, exch_api, token_symbol, current_price, event_new_price):
-        threading.Thread.__init__(self)
-
         self.old_price = -1
         self.current_price = [current_price]
         self.exch_api = exch_api
-        self.day_duration = 60 * 60 * 24 - 500  # 500 secondes before to be safe
+        self.day_duration = 60 * 60 * 24 - 500  # 500 seconds before to be safe
 
         self.token_symbol = token_symbol
-        self.pair, self.ordered = self.exch_api.find_pair_from_tokens('USDT',
-                                                                      token_symbol)
+        self.pair, self.ordered = self.exch_api.find_pair_from_tokens('USDT', token_symbol)
 
-        self.killer = threading.Event()
+        self.killer = asyncio.Event()
         self.event_new_price = event_new_price
 
         if self.ordered is None:
-            uprint(f'ERROR: pair of USDT and {token_symbol} do not exist at'
-                   f'this point although it should.')
+            uprint(f'ERROR: pair of USDT and {token_symbol} do not exist at this point although it should.')
             sys.exit(1)
 
-    def run(self):
-        ws_handle = self.exch_api.create_ws_handle()
-        ws_handle.settimeout(1)  # so that `recv` doesn't take more than 1s
+    async def run(self):
+        async with self.exch_api.create_ws_handle() as ws_handle:
+            await ws_handle.send(self.exch_api.get_subscription_data_ws(self.pair))
+            tps_start = time.time()
+            tps = tps_start
 
-        data_subscription = self.exch_api.get_subscription_data_ws(self.pair)
-        ws_handle.send(data_subscription)
+            while not self.killer.is_set():
+                try:
+                    received = await asyncio.wait_for(ws_handle.recv(), timeout=1)
+                    received_json = json.loads(received)
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    uprint(f'Exception in KucoinPriceSellSocket: {e} (expected)')
+                    continue
 
-        tps_start = time.time()
-        tps = tps_start
-        lock = threading.Lock()
+                if 'topic' not in received_json:
+                    uprint(f'WARNING: discard socket data {received_json}')
+                    continue
 
-        while True:
-            try:
-                received = ws_handle.recv()
-                received_json = json.loads(received)
-            except Exception as e:
-                #uprint(f'Exception in GetPriceSellSocketThread: {e} (expected)')
-                pass
+                # have the denomination in USDT
+                if not self.ordered:
+                    self.current_price[0] = float(received_json['data']['bestBid'])
+                else:
+                    self.current_price[0] = 1 / float(received_json['data']['bestAsk'])
 
-            if 'topic' not in received_json.keys():
-                uprint(f'WARNING: discard socket data {received_json}')
-                continue
-
-            # have the denomination in USDT
-            if not self.ordered:
-                self.current_price[0] = float(received_json['data']['bestBid'])
-            else:
-                self.current_price[0] = 1 / float(received_json['data']['bestAsk'])
-            # uprint(f'Looped in SocketThread! ({self.current_price[0]})')
-
-            if self.old_price != self.current_price[0]:
-                with lock:
+                if self.old_price != self.current_price[0]:
                     self.event_new_price.set()
-                self.old_price = self.current_price[0]
+                    self.old_price = self.current_price[0]
 
-            current_tps = time.time()
-            # we need to ping to not loose connection
-            if current_tps - tps > 8:
-                ws_handle.ping()
-                tps = current_tps
+                current_tps = time.time()
+                # we need to ping to not lose connection
+                if current_tps - tps > 8:
+                    await ws_handle.ping()
+                    tps = current_tps
 
-            # the token is valid only 24 hours
-            if current_tps - tps_start > self.day_duration:
-                ws_handle.close()
-                ws_handle = self.exch_api.create_ws_handle()
-                data_subscription = self.exch_api.get_subscription_data_ws(
-                                                                    self.pair)
-                ws_handle.send(data_subscription)
-                tps_start = time.time()
-
-            # to exist gracefully once the parent thread for this pair has done
-            # its job
-            if self.killer.is_set():
-                break
+                # the token is valid only 24 hours
+                if current_tps - tps_start > self.day_duration:
+                    await ws_handle.close()
+                    async with self.exch_api.create_ws_handle() as ws_handle:
+                        await ws_handle.send(self.exch_api.get_subscription_data_ws(self.pair))
+                    tps_start = time.time()
 
 
 if __name__ == '__main__':
     kucoin = KucoinAPI()
-
 
     """
     data = kucoin.get_ticker('USDT', 'ORBS')
@@ -466,18 +450,17 @@ if __name__ == '__main__':
     max_impact = 0.001
     """
 
-    #uprint(f'Expected max price: {best_bid * (1 + max_impact)}')
-    #uprint(f'Best ask: {best_ask}')
-##
-    #print('USDT', 'ORBS')
+    # uprint(f'Expected max price: {best_bid * (1 + max_impact)}')
+    # uprint(f'Best ask: {best_ask}')
+    ##
+    # print('USDT', 'ORBS')
     res = kucoin.order_limit('USDT', 'AAVE', max_impact=0.001,
-                amount_sell=1.05, time_in_force='IOC')
-##
+                             amount_sell=1.05, time_in_force='IOC')
+    ##
     res = kucoin.order_limit_max('AAVE', 'USDT', max_impact=0.1, time_in_force='IOC')
 
-    #execution_price = kucoin.get_execution_price(res, 'USDT', 'ORBS')
+    # execution_price = kucoin.get_execution_price(res, 'USDT', 'ORBS')
     ##
 
     print(json.dumps(kucoin.get_order_details(res['data']['orderId']),
                      indent=4))
-
