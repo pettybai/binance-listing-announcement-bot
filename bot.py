@@ -1,13 +1,11 @@
 import asyncio
 import hashlib
 import json
-import logging
+
 import aiohttp
 import aiohttp_socks
 
 from api.api_kucoin import KucoinAPI, KucoinPriceSellSocket
-from api.api_bkex import BKEX_API
-from api.api_mexc import MEXC_API
 from find_token import RegexTitle
 from utils import uprint
 

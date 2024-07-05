@@ -1,24 +1,19 @@
-import sys
-
-import aiohttp
 import asyncio
 import base64
 import hashlib
 import hmac
 import json
+import sys
 import time
 import uuid
-
 from datetime import datetime, timedelta
 
+import aiohttp
 import websockets
-from websockets import connect
-from websockets.exceptions import ConnectionClosed
-
-from logins import personal_keys
-from utils import round_nearest, uprint
 
 from api.api_general import GeneralAPI
+from logins import personal_keys
+from utils import uprint
 
 
 class KucoinAPI(GeneralAPI):
