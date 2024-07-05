@@ -115,7 +115,7 @@ class ExchangeRefresh:
     async def refresh_exchange(self):
         uprint(f'开始循环刷新交易所 {self.exch_api.exch_name}。')
         while True:
-            self.exch_api.refresh()
+            await self.exch_api.refresh()
             await asyncio.sleep(3600)
             uprint(f'更新交易所 {self.exch_api.exch_name}')
 
@@ -130,14 +130,14 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
         uprint(f'[{exch_api.exch_name}: {token_symbol}] 购买失败（代币名称不匹配）')
         return False
 
-    response = exch_api.order_limit(token_sell='USDT', token_buy=token_symbol, max_impact=max_impact, amount_sell=amount_sell, time_in_force='IOC')
+    response = await exch_api.order_limit(token_sell='USDT', token_buy=token_symbol, max_impact=max_impact, amount_sell=amount_sell, time_in_force='IOC')
 
     if response['code'] != exch_api.valid_code_on_limit_order:
         uprint(f'[{exch_api.exch_name}: {token_symbol}] 警告：原始买单响应码错误，原始响应：\n        {response}')
         return False
 
-    ref_price = exch_api.get_price_sell(token_sell=token_symbol, token_buy='USDT')
-    execution_price = exch_api.get_execution_price(response, denomination='USDT', second_token=token_symbol)
+    ref_price = await exch_api.get_price_sell(token_sell=token_symbol, token_buy='USDT')
+    execution_price = await exch_api.get_price_sell(token_sell=token_symbol, token_buy='USDT')
 
     if not execution_price:
         uprint(f'[{exch_api.exch_name}: {token_symbol}] 空买单。中止此交易所和代币的反应。')
@@ -164,10 +164,10 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
     start_time = asyncio.get_event_loop().time()
     while True:
         if asyncio.get_event_loop().time() - start_time < 2:
-            current_price = exch_api.get_price_sell(token_symbol, 'USDT')
+            current_price = await exch_api.get_price_sell(token_symbol, 'USDT')
         elif not exch_api.support_websocket:
             await asyncio.sleep(0.5)
-            current_price = exch_api.get_price_sell(token_symbol, 'USDT')
+            current_price = await exch_api.get_price_sell(token_symbol, 'USDT')
         else:
             await event_new_price.wait()
             current_price = price_socket.current_price[0]
@@ -180,21 +180,21 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
 
         if current_price > ceil_sell:
             uprint(f'[{exch_api.exch_name}: {token_symbol}] 当前价格 {current_price:.4f} 超过最高卖价 {ceil_sell:.4f}，以约2倍利润出售。')
-            response = exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2, time_in_force='IOC')
+            response = await exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2, time_in_force='IOC')
             if exch_api.support_websocket:
                 price_socket.killer.set()
             break
 
         if current_price < floor_sell:
             uprint(f'[{exch_api.exch_name}: {token_symbol}] 当前价格 {current_price:.4f} 低于最低卖价 {floor_sell:.4f}，亏损出售。')
-            response = exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2, time_in_force='IOC')
+            response = await exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2, time_in_force='IOC')
             if exch_api.support_websocket:
                 price_socket.killer.set()
             break
 
         if current_price < trailing_sell_price and trailing_sell_price > ref_price:
             uprint(f'[{exch_api.exch_name}: {token_symbol}] 当前价格 {current_price:.4f} 低于追踪卖价 {trailing_sell_price:.4f}，出售。')
-            response = exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2, time_in_force='IOC')
+            response = await exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2, time_in_force='IOC')
             if exch_api.support_websocket:
                 price_socket.killer.set()
             break
@@ -209,14 +209,14 @@ async def main():
 
     exchanges_apis = {
         'Kucoin': KucoinAPI(),
-        'MEXC': MEXC_API(),
-        'BKEX': BKEX_API()
+        # 'MEXC': MEXC_API(),
+        # 'BKEX': BKEX_API()
     }
 
     exchanges_apis_sockets = {
         'Kucoin': KucoinPriceSellSocket,
-        'MEXC': None,
-        'BKEX': None
+        # 'MEXC': None,
+        # 'BKEX': None
     }
 
     refresh_tasks = []

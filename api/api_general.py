@@ -8,18 +8,18 @@ class GeneralAPI():
         # a dictionary of symbol to name
         self.listed_tokens = []
 
-    def refresh(self):
-        self.update_pairs()
-        self.update_tokens()
+    async def refresh(self):
+        await self.update_pairs()
+        await self.update_tokens()
 
-    def update_pairs(self):
+    async def update_pairs(self):
         """
         Generate a set of pairs (like 'USDT-BTC') on the exchange, and a dict
         of specifications for each pair (step size, min and max order size)
         """
         raise NotImplementedError
 
-    def update_tokens(self):
+    async def update_tokens(self):
         """
         Generate a dictionary mapping token symbols to names on the exchange
         """
@@ -31,7 +31,7 @@ class GeneralAPI():
         """
         raise NotImplementedError
 
-    def get_price_sell(self):
+    async def get_price_sell(self):
         """
         Denomination in the `token_buy`
 
@@ -39,33 +39,33 @@ class GeneralAPI():
         """
         raise NotImplementedError
 
-    def order_limit(self):
+    async def order_limit(self):
         raise NotImplementedError
 
-    def order_limit_max(self):
+    async def order_limit_max(self):
         """
         Place order to sell `token_sell` and buy `token_buy`, with the maximum
         amount available.
         """
         raise NotImplementedError
 
-    def get_order_details(self):
+    async def get_order_details(self):
         raise NotImplementedError
 
-    def get_execution_price(self):
+    async def get_execution_price(self):
         """
         Get the average price of an order from its response.
         """
 
         raise NotImplementedError
 
-    def get_balance(self):
+    async def get_balance(self):
         """
         Return the balance for the given token, both total and available.
         """
         raise NotImplementedError
 
-    def create_ws_handle(self):
+    async def create_ws_handle(self):
         raise NotImplementedError
 
     def get_subscription_data_ws(self):
