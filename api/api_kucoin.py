@@ -16,6 +16,7 @@ from logins import personal_keys
 from utils import round_nearest, uprint
 
 from api.api_general import GeneralAPI
+from datetime import datetime, timedelta
 
 
 class KucoinAPI(GeneralAPI):
@@ -109,8 +110,9 @@ class KucoinAPI(GeneralAPI):
         """
         Return a header needed to include in a request
         """
-        now = int(time.time() * 1000)
-        str_to_sign = str(now) + full_endpoint + data_string
+        now = datetime.utcnow() + timedelta(hours=8)
+        timestamp = int(now.timestamp() * 1000)
+        str_to_sign = str(timestamp) + full_endpoint + data_string
         signature = base64.b64encode(hmac.new(self.api_secret.encode('utf-8'),
                                               str_to_sign.encode('utf-8'),
                                               hashlib.sha256).digest())

@@ -3,8 +3,9 @@ import hashlib
 import json
 import logging
 import aiohttp
+import aiohttp_socks
 
-from api.api_kucoin import KucoinAPI, KucoinPriceSellSocketThread
+from api.api_kucoin import KucoinAPI, KucoinPriceSellSocket
 from api.api_bkex import BKEX_API
 from api.api_mexc import MEXC_API
 from find_token import RegexTitle
@@ -15,7 +16,10 @@ class RefreshAnnouncements:
     def __init__(self, exchs_apis, exchs_apis_sockets):
         self.url = 'https://www.binance.com/en/support/announcement/c-48'
         self.second_url = 'https://www.binance.com/bapi/composite/v1/public/cms/article/catalog/list/query?catalogId=48&pageNo=1&pageSize=15'
-        self.session = aiohttp.ClientSession()
+        proxy_url = 'socks5://host.docker.internal:7897'
+        self.connector = aiohttp_socks.ProxyConnector.from_url(proxy_url)
+        timeout = aiohttp.ClientTimeout(total=10)
+        self.session = aiohttp.ClientSession(connector=self.connector, timeout=timeout)
         self.regex_title = RegexTitle()
         self.exchs_apis = exchs_apis
         self.exchs_apis_sockets = exchs_apis_sockets
@@ -50,9 +54,12 @@ class RefreshAnnouncements:
             try:
                 async with self.session.get(current_url, headers=headers) as r:
                     r_text = await r.text()
+                    print(r_text)
+            except asyncio.TimeoutError:
+                print("请求超时")
             except aiohttp.ClientError as e:
                 uprint(e)
-                self.session = aiohttp.ClientSession()
+                self.session = aiohttp.ClientSession(connector=self.connector)
                 uprint(f'可能连接中断，重新启动会话。')
                 continue
 
@@ -151,8 +158,8 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
 
     if exch_api.support_websocket:
         event_new_price = asyncio.Event()
-        thread_price_feed = exch_api_socket_class(exch_api=exch_api, token_symbol=token_symbol, current_price=current_price, event_new_price=event_new_price)
-        await thread_price_feed.start()
+        price_socket = exch_api_socket_class(exch_api, token_symbol, current_price, event_new_price)
+        await asyncio.create_task(price_socket.run())
 
     start_time = asyncio.get_event_loop().time()
     while True:
@@ -163,7 +170,7 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
             current_price = exch_api.get_price_sell(token_symbol, 'USDT')
         else:
             await event_new_price.wait()
-            current_price = thread_price_feed.current_price[0]
+            current_price = price_socket.current_price[0]
             event_new_price.clear()
 
         if not current_price:
@@ -175,21 +182,21 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
             uprint(f'[{exch_api.exch_name}: {token_symbol}] 当前价格 {current_price:.4f} 超过最高卖价 {ceil_sell:.4f}，以约2倍利润出售。')
             response = exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2, time_in_force='IOC')
             if exch_api.support_websocket:
-                await thread_price_feed.stop()
+                price_socket.killer.set()
             break
 
         if current_price < floor_sell:
             uprint(f'[{exch_api.exch_name}: {token_symbol}] 当前价格 {current_price:.4f} 低于最低卖价 {floor_sell:.4f}，亏损出售。')
             response = exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2, time_in_force='IOC')
             if exch_api.support_websocket:
-                await thread_price_feed.stop()
+                price_socket.killer.set()
             break
 
         if current_price < trailing_sell_price and trailing_sell_price > ref_price:
             uprint(f'[{exch_api.exch_name}: {token_symbol}] 当前价格 {current_price:.4f} 低于追踪卖价 {trailing_sell_price:.4f}，出售。')
             response = exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2, time_in_force='IOC')
             if exch_api.support_websocket:
-                await thread_price_feed.stop()
+                price_socket.killer.set()
             break
 
         if current_price > max_reached_price:
@@ -207,7 +214,7 @@ async def main():
     }
 
     exchanges_apis_sockets = {
-        'Kucoin': KucoinPriceSellSocketThread,
+        'Kucoin': KucoinPriceSellSocket,
         'MEXC': None,
         'BKEX': None
     }
