@@ -426,7 +426,7 @@ class KucoinPriceSellSocket:
                 current_tps = time.time()
                 # we need to ping to not lose connection
                 if current_tps - tps > 8:
-                    await ws_handle.ping()
+                    # await ws_handle.ping()
                     tps = current_tps
 
                 # the token is valid only 24 hours

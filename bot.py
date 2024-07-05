@@ -159,7 +159,7 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
     if exch_api.support_websocket:
         event_new_price = asyncio.Event()
         price_socket = exch_api_socket_class(exch_api, token_symbol, current_price, event_new_price)
-        await asyncio.create_task(price_socket.run())
+        asyncio.create_task(price_socket.run())
 
     start_time = asyncio.get_event_loop().time()
     while True:
