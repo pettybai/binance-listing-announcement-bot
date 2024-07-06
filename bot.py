@@ -27,8 +27,12 @@ class RefreshAnnouncements:
         self.titles = []
         self.ind = 0
 
-    async def close(self):
-        await self.session.close()
+    def react_announcement(self, symbols, token_names):
+        for i in range(len(symbols)):
+            for exch_name in self.exchs_apis_sockets.keys():
+                task = react_on_announcement(self.exchs_apis[exch_name], self.exchs_apis_sockets[exch_name],
+                                             symbols[i], token_names[i], 0.1, 130)
+                asyncio.create_task(task)
 
     async def get_announcement(self):
         headers = {'Cache-Control': 'no-cache, no-store, public, must-revalidate, proxy-revalidate, max-age=0',
@@ -50,7 +54,6 @@ class RefreshAnnouncements:
         try:
             async with self.session.get(current_url, headers=headers) as r:
                 r_text = await r.text()
-                uprint(r_text)
         except aiohttp.ClientError as e:
             uprint(e)
             self.session = aiohttp.ClientSession(connector=self.connector)
@@ -76,13 +79,6 @@ class RefreshAnnouncements:
 
         return False, r_text, from_title
 
-    def react_announcement(self, symbols, token_names):
-        for i in range(len(symbols)):
-            for exch_name in self.exchs_apis_sockets.keys():
-                task = react_on_announcement(self.exchs_apis[exch_name], self.exchs_apis_sockets[exch_name],
-                                             symbols[i], token_names[i], 0.1, 130)
-                asyncio.create_task(task)
-
     async def run(self):
         uprint(f'开始循环刷新公告。')
         while True:
@@ -98,87 +94,11 @@ class RefreshAnnouncements:
                 if self.title in self.titles:
                     continue
 
-                self.react_announcement(symbols, token_names)
-                await asyncio.sleep(10)
-
-    async def refresh_announcements(self):
-        checksum = ['', '']
-        title = ''
-        titles = []
-        ind = 0
-
-        headers = {'Cache-Control': 'no-cache, no-store, public, must-revalidate, proxy-revalidate, max-age=0',
-                   'Pragma': 'no-cache',
-                   'Expires': '0'}
-
-        uprint(f'开始循环刷新公告。')
-        while True:
-            await asyncio.sleep(0.04)
-            ind += 1
-            if ind == 13:
-                ind = 0
-                current_url = self.second_url
-                from_title = True
-                index = 1
-            else:
-                current_url = self.url
-                from_title = False
-                index = 0
-
-            try:
-                async with self.session.get(current_url, headers=headers) as r:
-                    r_text = await r.text()
-                    uprint(r_text)
-            except asyncio.TimeoutError:
-                uprint("请求超时")
-            except aiohttp.ClientError as e:
-                uprint(e)
-                self.session = aiohttp.ClientSession(connector=self.connector)
-                uprint(f'可能连接中断，重新启动会话。')
-                continue
-
-            if r.status != 200:
-                uprint(current_url)
-                uprint(r_text)
-                await asyncio.sleep(5 * 60)
-                uprint(f'返回码错误，休眠5分钟后继续。')
-                continue
-
-            if from_title:
-                try:
-                    r_text = json.loads(r_text)['data']['articles'][0]['title']
-                except Exception as e:
-                    uprint(f'{e}, 响应文本: {r_text}')
-
-            newchecksum = hashlib.sha256(r_text.encode('utf-8')).hexdigest()
-
-            if newchecksum != checksum[index]:
-                checksum[index] = newchecksum
-
-                new_title, symbols, token_names = self.regex_title.find_token(r_text, from_title=from_title)
-
-                if title == '':
-                    title = new_title
-                    titles.append(title)
-
-                title = new_title
-
-                if title in titles:
-                    continue
-
-                uprint(f'[**** 警报 ****] Binance 公告中检测到新新闻：\n        {title}')
+                uprint(f'[**** 警报 ****] Binance 公告中检测到新新闻：\n        {self.title}')
                 uprint(f'检测到的符号：\n        {symbols}')
                 uprint(f'检测到的代币名称：\n        {token_names}')
 
-                titles.append(title)
-
-                tasks = []
-                for i in range(len(symbols)):
-                    for exch_name in self.exchs_apis_sockets.keys():
-                        task = react_on_announcement(self.exchs_apis[exch_name], self.exchs_apis_sockets[exch_name],
-                                                     symbols[i], token_names[i], 0.1, 130)
-                        tasks.append(task)
-                asyncio.gather(*tasks)
+                self.react_announcement(symbols, token_names)
                 await asyncio.sleep(10)
 
 
@@ -236,7 +156,7 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
     if exch_api.support_websocket:
         event_new_price = asyncio.Event()
         price_socket = exch_api_socket_class(exch_api, token_symbol, current_price, event_new_price)
-        asyncio.create_task(price_socket.run())
+        price_socket_task = asyncio.create_task(price_socket.run())
 
     start_time = asyncio.get_event_loop().time()
     while True:
@@ -261,7 +181,7 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
             response = await exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2,
                                                       time_in_force='IOC')
             if exch_api.support_websocket:
-                price_socket.killer.set()
+                price_socket_task.cancel()
             break
 
         if current_price < floor_sell:
@@ -270,7 +190,7 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
             response = await exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2,
                                                       time_in_force='IOC')
             if exch_api.support_websocket:
-                price_socket.killer.set()
+                price_socket_task.cancel()
             break
 
         if current_price < trailing_sell_price and trailing_sell_price > ref_price:
@@ -279,7 +199,7 @@ async def react_on_announcement(exch_api, exch_api_socket_class, token_symbol, t
             response = await exch_api.order_limit_max(token_sell=token_symbol, token_buy='USDT', max_impact=0.2,
                                                       time_in_force='IOC')
             if exch_api.support_websocket:
-                price_socket.killer.set()
+                price_socket_task.cancel()
             break
 
         if current_price > max_reached_price:
