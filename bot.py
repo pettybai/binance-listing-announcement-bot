@@ -52,9 +52,9 @@ class RefreshAnnouncements:
             try:
                 async with self.session.get(current_url, headers=headers) as r:
                     r_text = await r.text()
-                    print(r_text)
+                    uprint(r_text)
             except asyncio.TimeoutError:
-                print("请求超时")
+                uprint("请求超时")
             except aiohttp.ClientError as e:
                 uprint(e)
                 self.session = aiohttp.ClientSession(connector=self.connector)
@@ -222,11 +222,10 @@ async def main():
         refresh_task = ExchangeRefresh(exch_api).refresh_exchange()
         refresh_tasks.append(refresh_task)
 
-    announcements_refresh = RefreshAnnouncements(exchanges_apis, exchanges_apis_sockets)
-    refresh_tasks.append(announcements_refresh.refresh_announcements())
+    refresh_announcements = RefreshAnnouncements(exchanges_apis, exchanges_apis_sockets).refresh_announcements()
+    refresh_tasks.append(refresh_announcements)
 
     await asyncio.gather(*refresh_tasks)
-    await announcements_refresh.close()
 
 
 if __name__ == '__main__':
