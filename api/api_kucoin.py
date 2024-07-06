@@ -88,7 +88,7 @@ class KucoinAPI(GeneralAPI):
             res = dict()
             resp_json = await response.json()
 
-            #TODO keep not only old name
+            # TODO keep not only old name
             # careful that `currency` holds the historical token symbol,
             # while `name` holds the current token symbol
             n_tokens = len(resp_json['data'])
