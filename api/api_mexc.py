@@ -9,7 +9,7 @@ import uuid
 
 from websocket import create_connection
 
-from logins import personal_keys
+from keys import personal_keys
 from utils import keysort, round_nearest, uprint
 
 from api.api_general import GeneralAPI

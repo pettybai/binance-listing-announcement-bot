@@ -12,7 +12,7 @@ import aiohttp
 import websockets
 
 from api.api_general import GeneralAPI
-from logins import personal_keys
+from keys import personal_keys
 from utils import uprint
 
 
